@@ -1,0 +1,52 @@
+#include <openssl/rand.h>
+#include <openssl/sha.h>
+#include <string>
+#include <utility>
+#include <iostream>
+
+std::pair<std::string, std::string> generateKeyAndIV() {
+    const int keySize = 32;
+    const int ivSize = 16;
+    const int hashSize = SHA256_DIGEST_LENGTH;
+
+    unsigned char randomData[keySize + ivSize];
+    unsigned char hash[hashSize];
+
+    try {
+        // Генерация случайных данных
+        if (RAND_bytes(randomData, sizeof(randomData)) != 1) {
+            throw std::runtime_error("Failed to generate random data");
+        }
+
+        // Вычисление хэша
+        if (SHA256(randomData, sizeof(randomData), hash) == nullptr) {
+            throw std::runtime_error("Failed to compute SHA256 hash");
+        }
+
+        // Конвертация хэша в строки
+        char keyBuffer[2 * keySize + 1];
+        char ivBuffer[2 * ivSize + 1];
+
+        for (int i = 0; i < keySize; i++) {
+            sprintf(&keyBuffer[2 * i], "%02x", hash[i]);
+        }
+        keyBuffer[2 * keySize] = '\0';
+        std::string key(keyBuffer, keySize);
+
+        for (int i = 0; i < ivSize; i++) {
+            sprintf(&ivBuffer[2 * i], "%02x", hash[keySize + i]);
+        }
+        ivBuffer[2 * ivSize] = '\0';
+        std::string iv(ivBuffer, ivSize);
+
+        return std::make_pair(key, iv);
+    } catch (const std::exception& e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        return std::make_pair("", "");
+    }
+}
+
+// Пример использования
+std::pair<std::string, std::string> keyAndIV = generateKeyAndIV();
+std::string key = keyAndIV.first;
+std::string iv = keyAndIV.second;

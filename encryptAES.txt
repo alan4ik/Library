@@ -1,0 +1,68 @@
+#include <openssl/evp.h>
+#include <openssl/aes.h>
+#include <openssl/rand.h>
+#include <string>
+#include <stdexcept>
+
+std::pair<std::string, size_t> encryptAES(const std::string& message, size_t messageLength) {
+    const int keyLength = 32; // Длина ключа (в байтах) для AES-256
+    const int ivLength = AES_BLOCK_SIZE; // Длина вектора инициализации (IV) (в байтах)
+
+    // Генерация случайного ключа и вектора инициализации
+    unsigned char key[keyLength];
+    unsigned char iv[ivLength];
+    if (RAND_bytes(key, sizeof(key)) != 1 || RAND_bytes(iv, sizeof(iv)) != 1) {
+        throw std::runtime_error("Failed to generate random key and IV");
+    }
+
+    // Создание контекста шифрования
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
+        throw std::runtime_error("Failed to create encryption context");
+    }
+
+    // Установка параметров шифрования
+    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("Failed to initialize encryption");
+    }
+
+    // Вычисление размера зашифрованного сообщения
+    int encryptedSize = messageLength + AES_BLOCK_SIZE;
+    std::string encryptedMessage(encryptedSize, '\0');
+    int actualEncryptedSize = 0;
+
+    // Шифрование сообщения
+    if (EVP_EncryptUpdate(ctx, reinterpret_cast<unsigned char*>(encryptedMessage.data()), &actualEncryptedSize,
+                          reinterpret_cast<const unsigned char*>(message.data()), messageLength) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("Failed to encrypt message");
+    }
+
+    // Завершение шифрования
+    int finalEncryptedSize = 0;
+    if (EVP_EncryptFinal_ex(ctx, reinterpret_cast<unsigned char*>(encryptedMessage.data()) + actualEncryptedSize,
+                            &finalEncryptedSize) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("Failed to finalize encryption");
+    }
+
+    EVP_CIPHER_CTX_free(ctx);
+
+    encryptedSize = actualEncryptedSize + finalEncryptedSize;
+
+    return std::make_pair(encryptedMessage, encryptedSize);
+}
+
+// Пример использования
+std::string message = "Hello, world!";
+size_t messageLength = message.length();
+
+try {
+    std::pair<std::string, size_t> encryptedData = encryptAES(message, messageLength);
+    std::string encryptedMessage = encryptedData.first;
+    size_t encryptedMessageLength = encryptedData.second;
+    // Дальнейшая обработка зашифрованного сообщения
+} catch (const std::exception& e) {
+    // Обработка ошибки
+}

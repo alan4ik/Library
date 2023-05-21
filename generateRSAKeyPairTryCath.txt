@@ -1,0 +1,77 @@
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <stdexcept>
+#include <string>
+
+std::pair<std::string, std::string> generateRSAKeyPair() {
+    std::pair<std::string, std::string> keyPair;
+
+    EVP_PKEY_CTX* ctx = nullptr;
+    EVP_PKEY* keypair = nullptr;
+    BIO* bioPublicKey = nullptr;
+    BIO* bioPrivateKey = nullptr;
+
+    try {
+        ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+        if (!ctx) {
+            throw std::runtime_error("Failed to create EVP_PKEY_CTX");
+        }
+
+        if (EVP_PKEY_keygen_init(ctx) <= 0 || EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, 2048) <= 0 ||
+            EVP_PKEY_keygen(ctx, &keypair) <= 0) {
+            throw std::runtime_error("Failed to generate RSA key pair");
+        }
+
+        bioPublicKey = BIO_new(BIO_s_mem());
+        if (!bioPublicKey || PEM_write_bio_PUBKEY(bioPublicKey, keypair) <= 0) {
+            throw std::runtime_error("Failed to write public key");
+        }
+
+        BUF_MEM* memPublicKey;
+        BIO_get_mem_ptr(bioPublicKey, &memPublicKey);
+        std::string publicKey(memPublicKey->data, memPublicKey->length);
+        BIO_free_all(bioPublicKey);
+
+        bioPrivateKey = BIO_new(BIO_s_mem());
+        if (!bioPrivateKey || PEM_write_bio_PrivateKey(bioPrivateKey, keypair, NULL, NULL, 0, NULL, NULL) <= 0) {
+            throw std::runtime_error("Failed to write private key");
+        }
+
+        BUF_MEM* memPrivateKey;
+        BIO_get_mem_ptr(bioPrivateKey, &memPrivateKey);
+        std::string privateKey(memPrivateKey->data, memPrivateKey->length);
+        BIO_free_all(bioPrivateKey);
+
+        keyPair.first = publicKey;
+        keyPair.second = privateKey;
+    } catch (const std::exception& e) {
+        if (ctx) {
+            EVP_PKEY_CTX_free(ctx);
+        }
+        if (keypair) {
+            EVP_PKEY_free(keypair);
+        }
+        if (bioPublicKey) {
+            BIO_free_all(bioPublicKey);
+        }
+        if (bioPrivateKey) {
+            BIO_free_all(bioPrivateKey);
+        }
+        throw;
+    }
+
+    EVP_PKEY_CTX_free(ctx);
+    EVP_PKEY_free(keypair);
+
+    return keyPair;
+}
+
+// Пример использования
+try {
+    std::pair<std::string, std::string> rsaKeyPair = generateRSAKeyPair();
+    std::string publicKey = rsaKeyPair.first;
+    std::string privateKey = rsaKeyPair.second;
+    // Дальнейшая обработка ключей
+} catch (const std::exception& e) {
+    // Обработка ошибки
+}
