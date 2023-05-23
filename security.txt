@@ -1,0 +1,599 @@
+#include <openssl/rsa.h>
+#include <openssl/pem.h>
+#include <openssl/rand.h>
+#include <openssl/evp.h>
+#include <openssl/sha.h>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <sstream>
+#include <iomanip>
+
+#pragma comment(lib, "Ws2_32.lib")
+#pragma comment (lib, "libcrypto.lib")
+#pragma comment (lib, "libssl.lib")
+#pragma warning(disable: 4996)
+
+// Функция для генерации пары ключей RSA и возвращения открытого и закрытого ключей
+std::pair<std::string, std::string> generateRSAKeyPair() {
+    std::pair<std::string, std::string> result;
+
+    // Создание структуры для хранения ключей
+    RSA* keyPair = RSA_new();
+    BIGNUM* exponent = BN_new();
+    BN_set_word(exponent, RSA_F4);
+
+    // Генерация ключей
+    RSA_generate_key_ex(keyPair, 2048, exponent, nullptr);
+
+    // Получение открытого ключа в формате PEM
+    BIO* publicKeyBio = BIO_new(BIO_s_mem());
+    PEM_write_bio_RSAPublicKey(publicKeyBio, keyPair);
+    BUF_MEM* publicKeyBuffer;
+    BIO_get_mem_ptr(publicKeyBio, &publicKeyBuffer);
+    std::string publicKey(publicKeyBuffer->data, publicKeyBuffer->length);
+    result.first = publicKey;
+
+    // Получение закрытого ключа в формате PEM
+    BIO* privateKeyBio = BIO_new(BIO_s_mem());
+    PEM_write_bio_RSAPrivateKey(privateKeyBio, keyPair, nullptr, nullptr, 0, nullptr, nullptr);
+    BUF_MEM* privateKeyBuffer;
+    BIO_get_mem_ptr(privateKeyBio, &privateKeyBuffer);
+    std::string privateKey(privateKeyBuffer->data, privateKeyBuffer->length);
+    result.second = privateKey;
+
+    // Освобождение ресурсов
+    RSA_free(keyPair);
+    BIO_free_all(publicKeyBio);
+    BIO_free_all(privateKeyBio);
+    BN_free(exponent);
+
+    return result;
+}
+
+// Функция для генерации случайной строки в виде ключа и IV
+std::pair<std::string, std::string> generateRandomKeyAndIV() {
+    const int keyLength = 32;
+    const int ivLength = 16;
+
+    unsigned char key[keyLength];
+    unsigned char iv[ivLength];
+
+    if (RAND_bytes(key, keyLength) != 1) {
+        std::cout << "Failed to generate random key." << std::endl;
+        return std::make_pair("", "");
+    }
+
+    if (RAND_bytes(iv, ivLength) != 1) {
+        std::cout << "Failed to generate random IV." << std::endl;
+        return std::make_pair("", "");
+    }
+
+    std::stringstream keyStream, ivStream;
+    for (int i = 0; i < keyLength; ++i) {
+        keyStream << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(key[i]);
+    }
+
+    for (int i = 0; i < ivLength; ++i) {
+        ivStream << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(iv[i]);
+    }
+
+    return std::make_pair(keyStream.str(), ivStream.str());
+}
+
+// Функция для шифрования с использованием RSA
+std::pair<std::string, size_t> encryptWithRSA(const std::string& publicKey, const std::string& message, size_t messageLength) {
+    std::pair<std::string, size_t> result;
+
+    // Создание объекта RSA из открытого ключа в формате PEM
+    BIO* publicKeyBio = BIO_new_mem_buf(publicKey.data(), -1);
+    RSA* rsaPublicKey = PEM_read_bio_RSAPublicKey(publicKeyBio, nullptr, nullptr, nullptr);
+    if (!rsaPublicKey) {
+        std::get<1>(result) = 0; // Длина зашифрованного сообщения
+        return result;
+    }
+
+    // Выделение памяти для зашифрованного сообщения
+    std::vector<unsigned char> encryptedData(RSA_size(rsaPublicKey));
+
+    // Шифрование сообщения
+    int encryptedLength = RSA_public_encrypt(static_cast<int>(messageLength),
+        reinterpret_cast<const unsigned char*>(message.data()),
+        encryptedData.data(),
+        rsaPublicKey,
+        RSA_PKCS1_PADDING);
+    if (encryptedLength == -1) {
+        std::get<1>(result) = 0; // Длина зашифрованного сообщения
+        RSA_free(rsaPublicKey);
+        BIO_free(publicKeyBio);
+        return result;
+    }
+
+    std::get<0>(result) = std::string(reinterpret_cast<const char*>(encryptedData.data()), encryptedLength);
+    std::get<1>(result) = encryptedLength;
+
+    RSA_free(rsaPublicKey);
+    BIO_free(publicKeyBio);
+
+    return result;
+}
+
+// Функция для расшифровки с использованием RSA
+std::pair<std::string, size_t> decryptWithRSA(const std::string& privateKey, const std::string& encryptedMessage, size_t encryptedMessageLength) {
+    std::pair<std::string, size_t> result;
+
+    // Создание объекта RSA из закрытого ключа в формате PEM
+    BIO* privateKeyBio = BIO_new_mem_buf(privateKey.data(), -1);
+    RSA* rsaPrivateKey = PEM_read_bio_RSAPrivateKey(privateKeyBio, nullptr, nullptr, nullptr);
+    if (!rsaPrivateKey) {
+        std::get<1>(result) = 0; // Длина расшифрованного сообщения
+        return result;
+    }
+
+    // Выделение памяти для расшифрованного сообщения
+    std::vector<unsigned char> decryptedData(encryptedMessageLength);
+
+    // Расшифровка сообщения
+    int decryptedLength = RSA_private_decrypt(static_cast<int>(encryptedMessageLength),
+        reinterpret_cast<const unsigned char*>(encryptedMessage.data()),
+        decryptedData.data(),
+        rsaPrivateKey,
+        RSA_PKCS1_PADDING);
+    if (decryptedLength == -1) {
+        std::get<1>(result) = 0; // Длина расшифрованного сообщения
+        RSA_free(rsaPrivateKey);
+        BIO_free(privateKeyBio);
+        return result;
+    }
+
+    std::get<0>(result) = std::string(reinterpret_cast<const char*>(decryptedData.data()), decryptedLength);
+    std::get<1>(result) = decryptedLength;
+
+    RSA_free(rsaPrivateKey);
+    BIO_free(privateKeyBio);
+
+    return result;
+}
+
+// Функция для шифрования с использованием AES
+std::pair<std::string, size_t> encryptWithAES(const std::string& message, size_t messageLength, const std::string& key, const std::string& iv) {
+    std::pair<std::string, size_t> result;
+
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
+        std::get<1>(result) = 0; // Длина зашифрованного сообщения
+        return result;
+    }
+
+    // Инициализация контекста шифрования AES
+    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, reinterpret_cast<const unsigned char*>(key.data()), reinterpret_cast<const unsigned char*>(iv.data())) != 1) {
+        std::get<1>(result) = 0; // Длина зашифрованного сообщения
+        EVP_CIPHER_CTX_free(ctx);
+        return result;
+    }
+
+    // Выделение памяти для зашифрованного сообщения (превышает размер оригинального сообщения на длину блока AES)
+    std::vector<unsigned char> encryptedData(messageLength + EVP_CIPHER_block_size(EVP_aes_256_cbc()));
+
+    int encryptedLength = 0;
+    int finalEncryptedLength = 0;
+
+    // Шифрование сообщения
+    if (EVP_EncryptUpdate(ctx, encryptedData.data(), &encryptedLength, reinterpret_cast<const unsigned char*>(message.data()), static_cast<int>(messageLength)) != 1) {
+        std::get<1>(result) = 0; // Длина зашифрованного сообщения
+        EVP_CIPHER_CTX_free(ctx);
+        return result;
+    }
+
+    // Завершение шифрования
+    if (EVP_EncryptFinal_ex(ctx, encryptedData.data() + encryptedLength, &finalEncryptedLength) != 1) {
+        std::get<1>(result) = 0; // Длина зашифрованного сообщения
+        EVP_CIPHER_CTX_free(ctx);
+        return result;
+    }
+
+    std::get<0>(result) = std::string(reinterpret_cast<const char*>(encryptedData.data()), encryptedLength + finalEncryptedLength);
+    std::get<1>(result) = encryptedLength + finalEncryptedLength;
+
+    EVP_CIPHER_CTX_free(ctx);
+
+    return result;
+}
+
+// Функция для расшифровки с использованием AES
+std::pair<std::string, size_t> decryptWithAES(const std::string& encryptedMessage, size_t encryptedMessageLength, const std::string& key, const std::string& iv) {
+    std::pair<std::string, size_t> result;
+
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
+        std::get<1>(result) = 0; // Длина расшифрованного сообщения
+        return result;
+    }
+
+    // Инициализация контекста расшифровки AES
+    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, reinterpret_cast<const unsigned char*>(key.data()), reinterpret_cast<const unsigned char*>(iv.data())) != 1) {
+        std::get<1>(result) = 0; // Длина расшифрованного сообщения
+        EVP_CIPHER_CTX_free(ctx);
+        return result;
+    }
+
+    // Выделение памяти для расшифрованного сообщения
+    std::vector<unsigned char> decryptedData(encryptedMessageLength);
+
+    int decryptedLength = 0;
+    int finalDecryptedLength = 0;
+
+    // Расшифровка сообщения
+    if (EVP_DecryptUpdate(ctx, decryptedData.data(), &decryptedLength, reinterpret_cast<const unsigned char*>(encryptedMessage.data()), static_cast<int>(encryptedMessageLength)) != 1) {
+        std::get<1>(result) = 0; // Длина расшифрованного сообщения
+        EVP_CIPHER_CTX_free(ctx);
+        return result;
+    }
+
+    // Завершение расшифровки
+    if (EVP_DecryptFinal_ex(ctx, decryptedData.data() + decryptedLength, &finalDecryptedLength) != 1) {
+        std::get<1>(result) = 0; // Длина расшифрованного сообщения
+        EVP_CIPHER_CTX_free(ctx);
+        return result;
+    }
+
+    std::get<0>(result) = std::string(reinterpret_cast<const char*>(decryptedData.data()), decryptedLength + finalDecryptedLength);
+    std::get<1>(result) = decryptedLength + finalDecryptedLength;
+
+    EVP_CIPHER_CTX_free(ctx);
+
+    return result;
+}
+
+// Функция для генерации случайного идентификатора
+std::string generateRandomID() {
+    const int idLength = 32;
+    unsigned char id[idLength];
+
+    if (RAND_bytes(id, idLength) != 1) {
+        std::cout << "Failed to generate random ID." << std::endl;
+        return "";
+    }
+
+    std::stringstream idStream;
+    for (int i = 0; i < idLength; ++i) {
+        idStream << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(id[i]);
+    }
+
+    return idStream.str();
+}
+
+// Функция для вычисления хэша сообщения
+std::string computeHash(const std::string& message, size_t messageLength) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char*>(message.data()), messageLength, hash);
+
+    std::string hashString(reinterpret_cast<const char*>(hash), SHA256_DIGEST_LENGTH);
+    return hashString;
+}
+
+int main() {
+    // Пример использования функций
+    std::pair<std::string, std::string> rsaKeyPair = generateRSAKeyPair();
+    std::cout << "RSA Public Key:\n" << rsaKeyPair.first << std::endl;
+    std::cout << "RSA Private Key:\n" << rsaKeyPair.second << std::endl;
+
+    std::pair<std::string, std::string> randomKeyIV = generateRandomKeyAndIV();
+    std::cout << "Random Key: " << randomKeyIV.first << std::endl;
+    std::cout << "Random IV: " << randomKeyIV.second << std::endl;
+
+    std::string message = "Hello, World!";
+    size_t messageLength = message.length();
+
+    std::pair<std::string, size_t> rsaEncrypted = encryptWithRSA(rsaKeyPair.first, message, messageLength);
+    std::cout << "Encrypted with RSA: " << rsaEncrypted.first << std::endl;
+    std::cout << "Encrypted message length: " << rsaEncrypted.second << std::endl;
+
+    std::pair<std::string, size_t> rsaDecrypted = decryptWithRSA(rsaKeyPair.second, rsaEncrypted.first, rsaEncrypted.second);
+    std::cout << "Decrypted with RSA: " << rsaDecrypted.first << std::endl;
+    std::cout << "Decrypted message length: " << rsaDecrypted.second << std::endl;
+
+    std::pair<std::string, size_t> aesEncrypted = encryptWithAES(message, messageLength, randomKeyIV.first, randomKeyIV.second);
+    std::cout << "Encrypted with AES: " << aesEncrypted.first << std::endl;
+    std::cout << "Encrypted message length: " << aesEncrypted.second << std::endl;
+
+    std::pair<std::string, size_t> aesDecrypted = decryptWithAES(aesEncrypted.first, aesEncrypted.second, randomKeyIV.first, randomKeyIV.second);
+    std::cout << "Decrypted with AES: " << aesDecrypted.first << std::endl;
+    std::cout << "Decrypted message length: " << aesDecrypted.second << std::endl;
+
+    std::string randomID = generateRandomID();
+    std::cout << "Random ID: " << randomID << std::endl;
+
+    std::string messageHash = computeHash(message, messageLength);
+    std::cout << "Message Hash: " << messageHash << std::endl;
+
+    return 0;
+}
+
+//// Функция для генерации пары ключей RSA и возвращения открытого и закрытого ключей
+//std::pair<std::string, std::string> generateRSAKeyPair() {
+//    std::pair<std::string, std::string> result;
+//
+//    // Создание структуры для хранения ключей
+//    RSA* keyPair = RSA_new();
+//    BIGNUM* exponent = BN_new();
+//    BN_set_word(exponent, RSA_F4);
+//
+//    // Генерация ключей
+//    RSA_generate_key_ex(keyPair, 2048, exponent, nullptr);
+//
+//    // Получение открытого ключа в формате PEM
+//    BIO* publicKeyBio = BIO_new(BIO_s_mem());
+//    PEM_write_bio_RSAPublicKey(publicKeyBio, keyPair);
+//    BUF_MEM* publicKeyBuffer;
+//    BIO_get_mem_ptr(publicKeyBio, &publicKeyBuffer);
+//    std::string publicKey(publicKeyBuffer->data, publicKeyBuffer->length);
+//    result.first = publicKey;
+//
+//    // Получение закрытого ключа в формате PEM
+//    BIO* privateKeyBio = BIO_new(BIO_s_mem());
+//    PEM_write_bio_RSAPrivateKey(privateKeyBio, keyPair, nullptr, nullptr, 0, nullptr, nullptr);
+//    BUF_MEM* privateKeyBuffer;
+//    BIO_get_mem_ptr(privateKeyBio, &privateKeyBuffer);
+//    std::string privateKey(privateKeyBuffer->data, privateKeyBuffer->length);
+//    result.second = privateKey;
+//
+//    // Освобождение ресурсов
+//    RSA_free(keyPair);
+//    BIO_free_all(publicKeyBio);
+//    BIO_free_all(privateKeyBio);
+//    BN_free(exponent);
+//
+//    return result;
+//}
+//
+//// Функция для генерации случайной строки и ее хэширования
+//std::pair<std::string, std::string> generateRandomKeyAndIV() {
+//    std::pair<std::string, std::string> result;
+//
+//    // Генерация случайной строки
+//    const int keyLength = 32;
+//    const int ivLength = 16;
+//    std::vector<unsigned char> randomData(keyLength + ivLength);
+//    RAND_bytes(randomData.data(), keyLength + ivLength);
+//
+//    // Хэширование случайной строки с использованием SHA
+//    unsigned char keyHash[SHA256_DIGEST_LENGTH];
+//    unsigned char ivHash[SHA256_DIGEST_LENGTH];
+//    SHA256(randomData.data(), keyLength + ivLength, keyHash);
+//    SHA256(randomData.data() + keyLength, ivLength, ivHash);
+//
+//    // Конвертация хеша в строки
+//    std::string key(reinterpret_cast<const char*>(keyHash), keyLength);
+//    std::string iv(reinterpret_cast<const char*>(ivHash), ivLength);
+//    result.first = key;
+//    result.second = iv;
+//
+//    return result;
+//}
+//
+//// Функция для шифрования с использованием RSA
+//std::pair<std::string, size_t> encryptWithRSA(const std::string& publicKey, const std::string& message, size_t messageLength) {
+//    std::pair<std::string, size_t> result;
+//
+//    // Создание объекта RSA из открытого ключа в формате PEM
+//    BIO* publicKeyBio = BIO_new_mem_buf(publicKey.data(), -1);
+//    RSA* rsaPublicKey = PEM_read_bio_RSAPublicKey(publicKeyBio, nullptr, nullptr, nullptr);
+//    if (!rsaPublicKey) {
+//        std::get<1>(result) = 0; // Длина зашифрованного сообщения
+//        return result;
+//    }
+//
+//    // Выделение памяти для зашифрованного сообщения
+//    std::vector<unsigned char> encryptedData(RSA_size(rsaPublicKey));
+//
+//    // Шифрование сообщения
+//    int encryptedLength = RSA_public_encrypt(static_cast<int>(messageLength),
+//        reinterpret_cast<const unsigned char*>(message.data()),
+//        encryptedData.data(),
+//        rsaPublicKey,
+//        RSA_PKCS1_PADDING);
+//    if (encryptedLength == -1) {
+//        std::get<1>(result) = 0; // Длина зашифрованного сообщения
+//        RSA_free(rsaPublicKey);
+//        BIO_free(publicKeyBio);
+//        return result;
+//    }
+//
+//    std::get<0>(result) = std::string(reinterpret_cast<const char*>(encryptedData.data()), encryptedLength);
+//    std::get<1>(result) = encryptedLength;
+//
+//    RSA_free(rsaPublicKey);
+//    BIO_free(publicKeyBio);
+//
+//    return result;
+//}
+//
+//// Функция для расшифровки с использованием RSA
+//std::pair<std::string, size_t> decryptWithRSA(const std::string& privateKey, const std::string& encryptedMessage, size_t encryptedMessageLength) {
+//    std::pair<std::string, size_t> result;
+//
+//    // Создание объекта RSA из закрытого ключа в формате PEM
+//    BIO* privateKeyBio = BIO_new_mem_buf(privateKey.data(), -1);
+//    RSA* rsaPrivateKey = PEM_read_bio_RSAPrivateKey(privateKeyBio, nullptr, nullptr, nullptr);
+//    if (!rsaPrivateKey) {
+//        std::get<1>(result) = 0; // Длина расшифрованного сообщения
+//        return result;
+//    }
+//
+//    // Выделение памяти для расшифрованного сообщения
+//    std::vector<unsigned char> decryptedData(encryptedMessageLength);
+//
+//    // Расшифровка сообщения
+//    int decryptedLength = RSA_private_decrypt(static_cast<int>(encryptedMessageLength),
+//        reinterpret_cast<const unsigned char*>(encryptedMessage.data()),
+//        decryptedData.data(),
+//        rsaPrivateKey,
+//        RSA_PKCS1_PADDING);
+//    if (decryptedLength == -1) {
+//        std::get<1>(result) = 0; // Длина расшифрованного сообщения
+//        RSA_free(rsaPrivateKey);
+//        BIO_free(privateKeyBio);
+//        return result;
+//    }
+//
+//    std::get<0>(result) = std::string(reinterpret_cast<const char*>(decryptedData.data()), decryptedLength);
+//    std::get<1>(result) = decryptedLength;
+//
+//    RSA_free(rsaPrivateKey);
+//    BIO_free(privateKeyBio);
+//
+//    return result;
+//}
+//
+//// Функция для шифрования с использованием AES
+//std::pair<std::string, size_t> encryptWithAES(const std::string& message, size_t messageLength, const std::string& key, const std::string& iv) {
+//    std::pair<std::string, size_t> result;
+//
+//    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+//    if (!ctx) {
+//        std::get<1>(result) = 0; // Длина зашифрованного сообщения
+//        return result;
+//    }
+//
+//    // Инициализация контекста шифрования AES
+//    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, reinterpret_cast<const unsigned char*>(key.data()), reinterpret_cast<const unsigned char*>(iv.data())) != 1) {
+//        std::get<1>(result) = 0; // Длина зашифрованного сообщения
+//        EVP_CIPHER_CTX_free(ctx);
+//        return result;
+//    }
+//
+//    // Выделение памяти для зашифрованного сообщения (превышает размер оригинального сообщения на длину блока AES)
+//    std::vector<unsigned char> encryptedData(messageLength + EVP_CIPHER_block_size(EVP_aes_256_cbc()));
+//
+//    int encryptedLength = 0;
+//    int finalEncryptedLength = 0;
+//
+//    // Шифрование сообщения
+//    if (EVP_EncryptUpdate(ctx, encryptedData.data(), &encryptedLength, reinterpret_cast<const unsigned char*>(message.data()), static_cast<int>(messageLength)) != 1) {
+//        std::get<1>(result) = 0; // Длина зашифрованного сообщения
+//        EVP_CIPHER_CTX_free(ctx);
+//        return result;
+//    }
+//
+//    // Завершение шифрования
+//    if (EVP_EncryptFinal_ex(ctx, encryptedData.data() + encryptedLength, &finalEncryptedLength) != 1) {
+//        std::get<1>(result) = 0; // Длина зашифрованного сообщения
+//        EVP_CIPHER_CTX_free(ctx);
+//        return result;
+//    }
+//
+//    std::get<0>(result) = std::string(reinterpret_cast<const char*>(encryptedData.data()), encryptedLength + finalEncryptedLength);
+//    std::get<1>(result) = encryptedLength + finalEncryptedLength;
+//
+//    EVP_CIPHER_CTX_free(ctx);
+//
+//    return result;
+//}
+//
+//// Функция для расшифровки с использованием AES
+//std::pair<std::string, size_t> decryptWithAES(const std::string& encryptedMessage, size_t encryptedMessageLength, const std::string& key, const std::string& iv) {
+//    std::pair<std::string, size_t> result;
+//
+//    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+//    if (!ctx) {
+//        std::get<1>(result) = 0; // Длина расшифрованного сообщения
+//        return result;
+//    }
+//
+//    // Инициализация контекста расшифровки AES
+//    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, reinterpret_cast<const unsigned char*>(key.data()), reinterpret_cast<const unsigned char*>(iv.data())) != 1) {
+//        std::get<1>(result) = 0; // Длина расшифрованного сообщения
+//        EVP_CIPHER_CTX_free(ctx);
+//        return result;
+//    }
+//
+//    // Выделение памяти для расшифрованного сообщения
+//    std::vector<unsigned char> decryptedData(encryptedMessageLength);
+//
+//    int decryptedLength = 0;
+//    int finalDecryptedLength = 0;
+//
+//    // Расшифровка сообщения
+//    if (EVP_DecryptUpdate(ctx, decryptedData.data(), &decryptedLength, reinterpret_cast<const unsigned char*>(encryptedMessage.data()), static_cast<int>(encryptedMessageLength)) != 1) {
+//        std::get<1>(result) = 0; // Длина расшифрованного сообщения
+//        EVP_CIPHER_CTX_free(ctx);
+//        return result;
+//    }
+//
+//    // Завершение расшифровки
+//    if (EVP_DecryptFinal_ex(ctx, decryptedData.data() + decryptedLength, &finalDecryptedLength) != 1) {
+//        std::get<1>(result) = 0; // Длина расшифрованного сообщения
+//        EVP_CIPHER_CTX_free(ctx);
+//        return result;
+//    }
+//
+//    std::get<0>(result) = std::string(reinterpret_cast<const char*>(decryptedData.data()), decryptedLength + finalDecryptedLength);
+//    std::get<1>(result) = decryptedLength + finalDecryptedLength;
+//
+//    EVP_CIPHER_CTX_free(ctx);
+//
+//    return result;
+//}
+//
+//// Функция для генерации случайной строки и ее хэширования
+//std::string generateRandomID() {
+//    const int idLength = 32;
+//    std::vector<unsigned char> randomData(idLength);
+//    RAND_bytes(randomData.data(), idLength);
+//
+//    // Хэширование случайной строки с использованием SHA
+//    unsigned char idHash[SHA256_DIGEST_LENGTH];
+//    SHA256(randomData.data(), idLength, idHash);
+//
+//    // Конвертация хеша в строку
+//    std::string id(reinterpret_cast<const char*>(idHash), idLength);
+//    return id;
+//}
+//
+//// Функция для вычисления хэша сообщения
+//std::string computeHash(const std::string& message, size_t messageLength) {
+//    unsigned char hash[SHA256_DIGEST_LENGTH];
+//    SHA256(reinterpret_cast<const unsigned char*>(message.data()), messageLength, hash);
+//
+//    std::string hashString(reinterpret_cast<const char*>(hash), SHA256_DIGEST_LENGTH);
+//    return hashString;
+//}
+//
+//int main() {
+//    // Пример использования функций
+//    std::pair<std::string, std::string> rsaKeyPair = generateRSAKeyPair();
+//    std::cout << "RSA Public Key:\n" << rsaKeyPair.first << std::endl;
+//    std::cout << "RSA Private Key:\n" << rsaKeyPair.second << std::endl;
+//
+//    std::pair<std::string, std::string> randomKeyIV = generateRandomKeyAndIV();
+//    std::cout << "Random Key: " << randomKeyIV.first << std::endl;
+//    std::cout << "Random IV: " << randomKeyIV.second << std::endl;
+//
+//    std::string message = "Hello, World!";
+//    size_t messageLength = message.length();
+//
+//    std::pair<std::string, size_t> rsaEncrypted = encryptWithRSA(rsaKeyPair.first, message, messageLength);
+//    std::cout << "Encrypted with RSA: " << rsaEncrypted.first << std::endl;
+//    std::cout << "Encrypted message length: " << rsaEncrypted.second << std::endl;
+//
+//    std::pair<std::string, size_t> rsaDecrypted = decryptWithRSA(rsaKeyPair.second, rsaEncrypted.first, rsaEncrypted.second);
+//    std::cout << "Decrypted with RSA: " << rsaDecrypted.first << std::endl;
+//    std::cout << "Decrypted message length: " << rsaDecrypted.second << std::endl;
+//
+//    std::pair<std::string, size_t> aesEncrypted = encryptWithAES(message, messageLength, randomKeyIV.first, randomKeyIV.second);
+//    std::cout << "Encrypted with AES: " << aesEncrypted.first << std::endl;
+//    std::cout << "Encrypted message length: " << aesEncrypted.second << std::endl;
+//
+//    std::pair<std::string, size_t> aesDecrypted = decryptWithAES(aesEncrypted.first, aesEncrypted.second, randomKeyIV.first, randomKeyIV.second);
+//    std::cout << "Decrypted with AES: " << aesDecrypted.first << std::endl;
+//    std::cout << "Decrypted message length: " << aesDecrypted.second << std::endl;
+//
+//    std::string randomID = generateRandomID();
+//    std::cout << "Random ID: " << randomID << std::endl;
+//
+//    std::string messageHash = computeHash(message, messageLength);
+//    std::cout << "Message Hash: " << messageHash << std::endl;
+//
+//    return 0;
+//}
