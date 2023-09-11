@@ -1,0 +1,137 @@
+#include <iostream>
+#include <functional>
+#include <chrono>
+#include <thread>
+#include <map>
+
+class TimerManager {
+public:
+    TimerManager() {}
+
+    void AddTimer(const std::function<void()>& func, int interval_seconds) {
+        std::thread timer_thread([func, interval_seconds, this]() {
+            while (true) {
+                std::this_thread::sleep_for(std::chrono::seconds(interval_seconds));
+                func();
+            }
+            });
+
+        timer_thread.detach();
+        timers_[func.target_type().name()] = std::move(timer_thread);
+    }
+
+    void RemoveTimer(const std::function<void()>& func) {
+        auto it = timers_.find(func.target_type().name());
+        if (it != timers_.end()) {
+            if (it->second.joinable()) {
+                it->second.join();
+            }
+            timers_.erase(it);
+        }
+    }
+
+private:
+    std::map<std::string, std::thread> timers_;
+};
+
+void CheckFunction() {
+    std::cout << "CheckFunction was called!" << std::endl;
+}
+
+int main() {
+    TimerManager timerManager;
+
+    timerManager.AddTimer(CheckFunction, 5); // Вызывает функцию CheckFunction каждые 5 секунд
+
+    std::this_thread::sleep_for(std::chrono::seconds(20));
+
+    timerManager.RemoveTimer(CheckFunction); // Останавливает таймер для функции CheckFunction
+
+    return 0;
+}
+
+/////////////////////////////
+
+#include <iostream>
+#include <functional>
+#include <chrono>
+#include <thread>
+#include <map>
+#include <set>
+#include <atomic>
+#include <vector>
+
+class TimerManager {
+public:
+    TimerManager() : next_timer_id_(0) {}
+
+    int AddTimer(const std::function<void()>& func, int interval_seconds) {
+        int timer_id = next_timer_id_++;
+        
+        std::thread timer_thread([func, interval_seconds, timer_id, this]() {
+            while (true) {
+                std::this_thread::sleep_for(std::chrono::seconds(interval_seconds));
+                if (!active_timers_.count(timer_id)) {
+                    break; // Приостановлено или удалено
+                }
+                func();
+            }
+        });
+
+        timer_thread.detach();
+        timers_[timer_id] = std::move(timer_thread);
+        
+        return timer_id;
+    }
+
+    void RemoveTimer(int timer_id) {
+        active_timers_.erase(timer_id);
+        auto it = timers_.find(timer_id);
+        if (it != timers_.end()) {
+            if (it->second.joinable()) {
+                it->second.join();
+            }
+            timers_.erase(it);
+        }
+    }
+
+    void PauseTimer(int timer_id) {
+        active_timers_.erase(timer_id);
+    }
+
+    void ResumeTimer(int timer_id) {
+        active_timers_.insert(timer_id);
+    }
+
+private:
+    std::map<int, std::thread> timers_;
+    std::set<int> active_timers_;
+    std::atomic<int> next_timer_id_;
+};
+
+void CheckFunction() {
+    std::cout << "CheckFunction was called!" << std::endl;
+}
+
+int main() {
+    TimerManager timerManager;
+
+    int timer1 = timerManager.AddTimer(CheckFunction, 5);
+    int timer2 = timerManager.AddTimer(CheckFunction, 3);
+
+    std::this_thread::sleep_for(std::chrono::seconds(12));
+
+    timerManager.PauseTimer(timer1);
+
+    std::this_thread::sleep_for(std::chrono::seconds(6));
+
+    timerManager.ResumeTimer(timer1);
+
+    std::this_thread::sleep_for(std::chrono::seconds(6));
+
+    timerManager.RemoveTimer(timer2);
+
+    std::this_thread::sleep_for(std::chrono::seconds(2)); // Подождать, чтобы убедиться, что функция CheckFunction вызывается
+
+    return 0;
+}
