@@ -1,137 +1,89 @@
-#include <iostream>
-#include <functional>
-#include <chrono>
-#include <thread>
-#include <map>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Управление ключами REST API</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1>Управление ключами REST API</h1>
 
-class TimerManager {
-public:
-    TimerManager() {}
+        <form id="apiKeyForm">
+            <div class="input-group mb-3">
+                <input type="text" class="form-control" id="apiKeyInput" placeholder="Введите новый ключ">
+                <div class="input-group-append">
+                    <button class="btn btn-primary" type="button" id="generateKeyBtn">Создать ключ</button>
+                </div>
+            </div>
+        </form>
 
-    void AddTimer(const std::function<void()>& func, int interval_seconds) {
-        std::thread timer_thread([func, interval_seconds, this]() {
-            while (true) {
-                std::this_thread::sleep_for(std::chrono::seconds(interval_seconds));
-                func();
-            }
+        <div id="apiKeyList" class="mt-3">
+            <h2>Список ключей REST API</h2>
+            <ul class="list-group">
+                <!-- Сюда будут добавляться ключи -->
+            </ul>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/2.0.4/clipboard.min.js"></script>
+    <script>
+        // Генерирование уникального ключа
+        function generateApiKey() {
+            return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        }
+
+        // Добавление ключа в список
+        function addApiKey(key) {
+            var apiKeyList = document.getElementById("apiKeyList");
+            var apiKeyItem = document.createElement("li");
+            apiKeyItem.className = "list-group-item";
+            apiKeyItem.textContent = key;
+
+            // Добавляем кнопку "Скопировать" справа
+            var copyBtn = document.createElement("button");
+            copyBtn.className = "btn btn-success btn-sm float-right";
+            copyBtn.textContent = "Скопировать";
+            copyBtn.setAttribute("data-clipboard-text", key);
+
+            copyBtn.addEventListener("click", function () {
+                var clipboard = new ClipboardJS(copyBtn);
+                clipboard.on('success', function(e) {
+                    alert('Ключ скопирован в буфер обмена: ' + e.text);
+                });
+
+                clipboard.onClick(copyBtn);
             });
 
-        timer_thread.detach();
-        timers_[func.target_type().name()] = std::move(timer_thread);
-    }
+            // Добавляем кнопку "Удалить" справа
+            var deleteBtn = document.createElement("button");
+            deleteBtn.className = "btn btn-danger btn-sm float-right ml-2";
+            deleteBtn.textContent = "Удалить";
+            deleteBtn.addEventListener("click", function () {
+                apiKeyItem.remove();
+            });
 
-    void RemoveTimer(const std::function<void()>& func) {
-        auto it = timers_.find(func.target_type().name());
-        if (it != timers_.end()) {
-            if (it->second.joinable()) {
-                it->second.join();
-            }
-            timers_.erase(it);
+            apiKeyItem.appendChild(copyBtn);
+            apiKeyItem.appendChild(deleteBtn);
+            apiKeyList.querySelector("ul").appendChild(apiKeyItem);
         }
-    }
 
-private:
-    std::map<std::string, std::thread> timers_;
-};
+        // Обработчик кнопки "Создать ключ"
+        document.getElementById("generateKeyBtn").addEventListener("click", function () {
+            var apiKeyInput = document.getElementById("apiKeyInput");
+            var apiKey = apiKeyInput.value.trim();
 
-void CheckFunction() {
-    std::cout << "CheckFunction was called!" << std::endl;
-}
-
-int main() {
-    TimerManager timerManager;
-
-    timerManager.AddTimer(CheckFunction, 5); // Вызывает функцию CheckFunction каждые 5 секунд
-
-    std::this_thread::sleep_for(std::chrono::seconds(20));
-
-    timerManager.RemoveTimer(CheckFunction); // Останавливает таймер для функции CheckFunction
-
-    return 0;
-}
-
-/////////////////////////////
-
-#include <iostream>
-#include <functional>
-#include <chrono>
-#include <thread>
-#include <map>
-#include <set>
-#include <atomic>
-#include <vector>
-
-class TimerManager {
-public:
-    TimerManager() : next_timer_id_(0) {}
-
-    int AddTimer(const std::function<void()>& func, int interval_seconds) {
-        int timer_id = next_timer_id_++;
-        
-        std::thread timer_thread([func, interval_seconds, timer_id, this]() {
-            while (true) {
-                std::this_thread::sleep_for(std::chrono::seconds(interval_seconds));
-                if (!active_timers_.count(timer_id)) {
-                    break; // Приостановлено или удалено
-                }
-                func();
+            if (apiKey === "") {
+                alert("Введите ключ");
+                return;
             }
+
+            addApiKey(apiKey);
+            apiKeyInput.value = "";
         });
 
-        timer_thread.detach();
-        timers_[timer_id] = std::move(timer_thread);
-        
-        return timer_id;
-    }
-
-    void RemoveTimer(int timer_id) {
-        active_timers_.erase(timer_id);
-        auto it = timers_.find(timer_id);
-        if (it != timers_.end()) {
-            if (it->second.joinable()) {
-                it->second.join();
-            }
-            timers_.erase(it);
-        }
-    }
-
-    void PauseTimer(int timer_id) {
-        active_timers_.erase(timer_id);
-    }
-
-    void ResumeTimer(int timer_id) {
-        active_timers_.insert(timer_id);
-    }
-
-private:
-    std::map<int, std::thread> timers_;
-    std::set<int> active_timers_;
-    std::atomic<int> next_timer_id_;
-};
-
-void CheckFunction() {
-    std::cout << "CheckFunction was called!" << std::endl;
-}
-
-int main() {
-    TimerManager timerManager;
-
-    int timer1 = timerManager.AddTimer(CheckFunction, 5);
-    int timer2 = timerManager.AddTimer(CheckFunction, 3);
-
-    std::this_thread::sleep_for(std::chrono::seconds(12));
-
-    timerManager.PauseTimer(timer1);
-
-    std::this_thread::sleep_for(std::chrono::seconds(6));
-
-    timerManager.ResumeTimer(timer1);
-
-    std::this_thread::sleep_for(std::chrono::seconds(6));
-
-    timerManager.RemoveTimer(timer2);
-
-    std::this_thread::sleep_for(std::chrono::seconds(2)); // Подождать, чтобы убедиться, что функция CheckFunction вызывается
-
-    return 0;
-}
+        // Предварительно добавьте существующие ключи, если они есть
+        addApiKey("example-key-1");
+        addApiKey("example-key-2");
+    </script>
+</body>
+</html>
