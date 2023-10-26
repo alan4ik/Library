@@ -1,89 +1,54 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Управление ключами REST API</title>
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-</head>
-<body>
-    <div class="container mt-5">
-        <h1>Управление ключами REST API</h1>
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <locale>
+#include <codecvt>
+#include "rapidjson/document.h"
 
-        <form id="apiKeyForm">
-            <div class="input-group mb-3">
-                <input type="text" class="form-control" id="apiKeyInput" placeholder="Введите новый ключ">
-                <div class="input-group-append">
-                    <button class="btn btn-primary" type="button" id="generateKeyBtn">Создать ключ</button>
-                </div>
-            </div>
-        </form>
+using namespace std;
 
-        <div id="apiKeyList" class="mt-3">
-            <h2>Список ключей REST API</h2>
-            <ul class="list-group">
-                <!-- Сюда будут добавляться ключи -->
-            </ul>
-        </div>
-    </div>
+int main() {
+    string content;
+    char ch;
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/2.0.4/clipboard.min.js"></script>
-    <script>
-        // Генерирование уникального ключа
-        function generateApiKey() {
-            return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    // Установите нужную локаль (кодировку)
+    setlocale(LC_CTYPE, ".UTF8");
+
+    ifstream in("test.txt");
+    in.imbue(locale(in.getloc(), new codecvt_utf8<char>)); // Используйте char, чтобы читать как байты
+
+    if (in.is_open()) {
+        while (in.get(ch)) {
+            content += ch;
         }
+    }
+    in.close();
 
-        // Добавление ключа в список
-        function addApiKey(key) {
-            var apiKeyList = document.getElementById("apiKeyList");
-            var apiKeyItem = document.createElement("li");
-            apiKeyItem.className = "list-group-item";
-            apiKeyItem.textContent = key;
+    // Ваша переменная wstring, содержащая JSON с символами Unicode и экранированными обратными слешами.
+    std::wstring jsonStr = L"{\"path\":\"D:\\\\Новая папка\"}";
 
-            // Добавляем кнопку "Скопировать" справа
-            var copyBtn = document.createElement("button");
-            copyBtn.className = "btn btn-success btn-sm float-right";
-            copyBtn.textContent = "Скопировать";
-            copyBtn.setAttribute("data-clipboard-text", key);
+    // Преобразуйте wstring в UTF-8 (std::string), так как RapidJSON работает с UTF-8.
+    std::string utf8JsonStr(jsonStr.begin(), jsonStr.end());
 
-            copyBtn.addEventListener("click", function () {
-                var clipboard = new ClipboardJS(copyBtn);
-                clipboard.on('success', function(e) {
-                    alert('Ключ скопирован в буфер обмена: ' + e.text);
-                });
+    typedef rapidjson::GenericDocument<rapidjson::UTF16<> > WDocument;
+    // Создайте парсер RapidJSON для разбора JSON.
+    WDocument document;
+    document.Parse(jsonStr.c_str());
 
-                clipboard.onClick(copyBtn);
-            });
-
-            // Добавляем кнопку "Удалить" справа
-            var deleteBtn = document.createElement("button");
-            deleteBtn.className = "btn btn-danger btn-sm float-right ml-2";
-            deleteBtn.textContent = "Удалить";
-            deleteBtn.addEventListener("click", function () {
-                apiKeyItem.remove();
-            });
-
-            apiKeyItem.appendChild(copyBtn);
-            apiKeyItem.appendChild(deleteBtn);
-            apiKeyList.querySelector("ul").appendChild(apiKeyItem);
-        }
-
-        // Обработчик кнопки "Создать ключ"
-        document.getElementById("generateKeyBtn").addEventListener("click", function () {
-            var apiKeyInput = document.getElementById("apiKeyInput");
-            var apiKey = apiKeyInput.value.trim();
-
-            if (apiKey === "") {
-                alert("Введите ключ");
-                return;
+    // Проверьте наличие ошибок при разборе JSON.
+    if (document.HasParseError()) {
+        // Обработка ошибок разбора.
+        std::cerr << "Ошибка разбора JSON: " << std::endl;
+    }
+    else {
+        // JSON успешно разобран. Можно обращаться к данным.
+        if (document.HasMember(L"path") && document[L"path"].IsString()) {
+            std::wstring path = document[L"path"].GetString();
+            if (path == L"D:\\Новая папка") {
+                int s = 1;
             }
+        }
+    }
 
-            addApiKey(apiKey);
-            apiKeyInput.value = "";
-        });
-
-        // Предварительно добавьте существующие ключи, если они есть
-        addApiKey("example-key-1");
-        addApiKey("example-key-2");
-    </script>
-</body>
-</html>
+    return 0;
+}
