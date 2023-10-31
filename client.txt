@@ -1,0 +1,89 @@
+#include <iostream>
+#include <openssl/evp.h>
+#include <cstring>
+#include <winsock2.h>
+
+#pragma warning(disable: 4996)
+#pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "libcrypto.lib")
+#pragma comment(lib, "libssl.lib")
+
+const char* SERVER_IP = "127.0.0.1";
+const int SERVER_PORT = 12345;
+
+// Hard-coded key and IV for AES encryption
+const char* AES_KEY = "MySecretKey12345";
+const char* AES_IV = "InitializationVe";
+
+void sendMessage(SOCKET clientSocket, EVP_CIPHER_CTX* ctx) {
+    const char* clientMessage = "Hello, Server, from Client!";
+    int clientMessage_len = strlen(clientMessage);
+
+    unsigned char ciphertext[256];
+    int len;
+    int ciphertext_len;
+
+    EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, (const unsigned char*)AES_KEY, (const unsigned char*)AES_IV);
+    EVP_EncryptUpdate(ctx, ciphertext, &len, (const unsigned char*)clientMessage, clientMessage_len);
+    ciphertext_len = len;
+    EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
+    ciphertext_len += len;
+
+    send(clientSocket, (char*)ciphertext, len, 0);
+
+    unsigned char encryptedMsg[256];
+    ciphertext_len = recv(clientSocket, (char*)encryptedMsg, sizeof(encryptedMsg), 0);
+
+    unsigned char plaintext[256];
+    int plaintext_len = 0;
+
+    EVP_DecryptInit_ex(ctx, EVP_aes_128_cbc(), NULL, (const unsigned char*)AES_KEY, (const unsigned char*)AES_IV);
+    EVP_DecryptUpdate(ctx, plaintext, &plaintext_len, (const unsigned char*)encryptedMsg, ciphertext_len);
+
+    int final_len_recv = 0;
+    EVP_DecryptFinal_ex(ctx, plaintext + plaintext_len, &final_len_recv);
+    plaintext_len += final_len_recv;
+    plaintext[plaintext_len] = '\0';
+
+    std::cout << "Received from Server: " << plaintext << std::endl;
+}
+
+int main() {
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        std::cerr << "WSAStartup failed" << std::endl;
+        return 1;
+    }
+
+    SOCKET clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (clientSocket == INVALID_SOCKET) {
+        std::cerr << "Socket creation failed" << std::endl;
+        WSACleanup();
+        return 1;
+    }
+
+    sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(SERVER_PORT);
+    serverAddr.sin_addr.s_addr = inet_addr(SERVER_IP);
+
+    if (connect(clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
+        std::cerr << "Connection failed" << std::endl;
+        closesocket(clientSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    EVP_CIPHER_CTX* ctx;
+    ctx = EVP_CIPHER_CTX_new();
+
+    while (true) {
+        sendMessage(clientSocket, ctx);
+    }
+
+    EVP_CIPHER_CTX_free(ctx);
+    closesocket(clientSocket);
+    WSACleanup();
+
+    return 0;
+}
